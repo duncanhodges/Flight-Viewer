@@ -1,0 +1,989 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Flight View — GPX drone track visualiser</title>
+
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&family=Inter:wght@400;500&display=swap" rel="stylesheet">
+
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.css"/>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/plotly.js/2.27.0/plotly.min.js"></script>
+
+<style>
+  :root{
+    --bg:#0b0f14;
+    --panel:#121821;
+    --panel-2:#0e131b;
+    --line:#212c38;
+    --line-soft:#1a232e;
+    --ink:#e7eef5;
+    --ink-dim:#8a97a6;
+    --ink-faint:#5b6775;
+    --accent:#ff8c42;
+    --accent-dim:#c96a30;
+    --good:#5ec962;
+    --mono:'IBM Plex Mono',ui-monospace,monospace;
+    --disp:'Space Grotesk',system-ui,sans-serif;
+    --body:'Inter',system-ui,sans-serif;
+  }
+  *{box-sizing:border-box}
+  html,body{height:100%}
+  body{
+    margin:0;background:var(--bg);color:var(--ink);
+    font-family:var(--body);font-size:14px;line-height:1.5;
+    -webkit-font-smoothing:antialiased;
+    display:flex;flex-direction:column;min-height:100vh;
+  }
+
+  /* ---- header ---- */
+  .topbar{
+    display:flex;align-items:center;gap:20px;flex-wrap:wrap;
+    padding:14px 22px;border-bottom:1px solid var(--line);
+    background:linear-gradient(180deg,var(--panel) 0%, var(--panel-2) 100%);
+  }
+  .brand{display:flex;align-items:baseline;gap:10px;margin-right:auto}
+  .brand .mark{
+    font-family:var(--disp);font-weight:700;font-size:19px;letter-spacing:-0.02em;
+  }
+  .brand .mark .dot{color:var(--accent)}
+  .brand .sub{
+    font-family:var(--mono);font-size:11px;color:var(--ink-faint);
+    text-transform:uppercase;letter-spacing:0.14em;
+  }
+  .loadbtn{
+    font-family:var(--mono);font-size:12px;font-weight:500;letter-spacing:0.04em;
+    color:var(--bg);background:var(--accent);border:none;border-radius:6px;
+    padding:9px 16px;cursor:pointer;transition:background .15s ease;
+    text-transform:uppercase;
+  }
+  .loadbtn:hover{background:#ffa05f}
+  .loadbtn:focus-visible{outline:2px solid #fff;outline-offset:2px}
+  .logbtn{
+    font-family:var(--mono);font-size:12px;font-weight:500;letter-spacing:0.04em;
+    color:var(--ink);background:transparent;border:1px solid var(--line);border-radius:6px;
+    padding:8px 15px;cursor:pointer;transition:border-color .15s,color .15s;text-transform:uppercase;
+  }
+  .logbtn:hover:not(:disabled){border-color:var(--accent);color:var(--accent)}
+  .logbtn:disabled{opacity:.4;cursor:default}
+  .logbtn:focus-visible{outline:2px solid #fff;outline-offset:2px}
+
+  /* ---- logbook modal ---- */
+  .backdrop{position:fixed;inset:0;z-index:1500;background:rgba(6,9,13,.72);
+    backdrop-filter:blur(3px);display:none;align-items:flex-start;justify-content:center;
+    padding:40px 18px;overflow-y:auto}
+  .backdrop.show{display:flex}
+  .sheet{background:var(--panel);border:1px solid var(--line);border-radius:14px;
+    width:100%;max-width:560px;box-shadow:0 24px 60px rgba(0,0,0,.5)}
+  .sheet-hd{display:flex;align-items:baseline;gap:12px;padding:20px 24px 12px}
+  .sheet-hd h2{font-family:var(--disp);font-size:20px;font-weight:600;margin:0;letter-spacing:-0.01em}
+  .sheet-hd .craft{font-family:var(--mono);font-size:12px;color:var(--accent);
+    text-transform:uppercase;letter-spacing:0.1em;margin-left:auto}
+  .logrows{padding:6px 24px 8px}
+  .logrow{display:grid;grid-template-columns:150px 1fr;gap:10px;padding:8px 0;
+    border-bottom:1px solid var(--line-soft);align-items:baseline}
+  .logrow:last-child{border-bottom:none}
+  .logrow .k{font-family:var(--mono);font-size:10px;color:var(--ink-faint);
+    text-transform:uppercase;letter-spacing:0.1em}
+  .logrow .v{font-family:var(--mono);font-size:13px;color:var(--ink);word-break:break-word}
+  .logrow .v .sub{color:var(--ink-dim);font-size:11px}
+  .loc-note{font-family:var(--body);font-size:11px;color:var(--ink-faint);padding:4px 24px 0}
+  .sheet-ft{display:flex;gap:10px;padding:16px 24px 20px;flex-wrap:wrap}
+  .sheet-ft button{font-family:var(--mono);font-size:12px;letter-spacing:0.04em;border-radius:6px;
+    padding:9px 15px;cursor:pointer;text-transform:uppercase;border:1px solid var(--line);
+    background:transparent;color:var(--ink);transition:border-color .15s,color .15s,background .15s}
+  .sheet-ft .look{border-color:var(--accent);color:var(--accent)}
+  .sheet-ft .look:hover{background:var(--accent);color:var(--bg)}
+  .sheet-ft .csv{margin-left:auto;background:var(--accent);color:var(--bg);border-color:var(--accent)}
+  .sheet-ft .csv:hover{background:#ffa05f}
+  .sheet-ft .print:hover{border-color:var(--accent);color:var(--accent)}
+  .sheet-ft button:disabled{opacity:.5;cursor:default}
+
+  @media print{
+    body>*:not(#backdrop){display:none !important}
+    .backdrop{position:static;display:block !important;background:#fff;padding:0;backdrop-filter:none}
+    .sheet{max-width:none;border:none;box-shadow:none;background:#fff;color:#000}
+    .sheet-hd h2,.logrow .k,.logrow .v,.sheet-hd .craft{color:#000 !important}
+    .logrow{border-color:#ccc}
+    .sheet-ft,.loc-note{display:none !important}
+    .logrow .v .sub{color:#444}
+  }
+  .filetag{
+    font-family:var(--mono);font-size:12px;color:var(--ink-dim);
+    max-width:240px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
+  }
+
+  /* ---- stat strip ---- */
+  .stats{
+    display:grid;grid-template-columns:repeat(auto-fit,minmax(118px,1fr));
+    gap:1px;background:var(--line-soft);border-bottom:1px solid var(--line);
+  }
+  .stat{background:var(--panel-2);padding:11px 16px}
+  .stat .k{
+    font-family:var(--mono);font-size:10px;color:var(--ink-faint);
+    text-transform:uppercase;letter-spacing:0.12em;margin-bottom:3px;
+  }
+  .stat .v{font-family:var(--mono);font-size:19px;font-weight:600;color:var(--ink)}
+  .stat .v .u{font-size:11px;color:var(--ink-dim);font-weight:400;margin-left:3px}
+  .stats.empty{display:none}
+
+  /* ---- body layout ---- */
+  .stage{flex:1;display:grid;grid-template-columns:1.35fr 1fr;min-height:0}
+  @media (max-width:900px){.stage{grid-template-columns:1fr;grid-auto-rows:minmax(320px,auto)}}
+
+  .mapwrap{position:relative;border-right:1px solid var(--line);min-height:0}
+  @media (max-width:900px){.mapwrap{border-right:none;border-bottom:1px solid var(--line)}}
+  #map{position:absolute;inset:0;background:var(--panel-2)}
+  .leaflet-container{background:#0a0e13}
+
+  .legend{
+    position:absolute;left:14px;bottom:14px;z-index:500;
+    background:rgba(11,15,20,.82);border:1px solid var(--line);border-radius:8px;
+    padding:9px 11px;backdrop-filter:blur(6px);
+  }
+  .legend .lt{font-family:var(--mono);font-size:9px;color:var(--ink-faint);
+    text-transform:uppercase;letter-spacing:0.12em;margin-bottom:6px}
+  .legend .bar{width:150px;height:9px;border-radius:3px;
+    background:linear-gradient(90deg,#440154,#3b528b,#21918c,#5ec962,#fde725)}
+  .legend .lr{display:flex;justify-content:space-between;margin-top:4px;
+    font-family:var(--mono);font-size:10px;color:var(--ink-dim)}
+  .ring-label{font-family:var(--mono);font-size:9px;letter-spacing:.06em;color:var(--accent);
+    background:rgba(11,15,20,.82);border:1px solid var(--accent);border-radius:4px;
+    text-align:center;line-height:13px;white-space:nowrap;pointer-events:none}
+
+  .right{display:flex;flex-direction:column;min-height:0;overflow-y:auto}
+  .plotpanel{position:relative;flex:1 0 230px;min-height:230px;border-bottom:1px solid var(--line)}
+  .plotpanel:last-child{border-bottom:none}
+
+  /* ---- basemap switcher ---- */
+  .basemap{
+    position:absolute;top:12px;right:12px;z-index:500;display:flex;gap:1px;
+    background:var(--line);border:1px solid var(--line);border-radius:7px;overflow:hidden;
+  }
+  .basemap button{
+    font-family:var(--mono);font-size:10px;letter-spacing:0.06em;text-transform:uppercase;
+    color:var(--ink-dim);background:rgba(11,15,20,.82);border:none;padding:6px 11px;cursor:pointer;
+    backdrop-filter:blur(6px);transition:color .12s,background .12s;
+  }
+  .basemap button:hover{color:var(--ink)}
+  .basemap button.on{color:var(--bg);background:var(--accent)}
+  .basemap button:focus-visible{outline:2px solid #fff;outline-offset:-2px}
+  .plothead{
+    position:absolute;top:0;left:0;right:0;z-index:5;pointer-events:none;
+    display:flex;align-items:center;gap:8px;padding:10px 14px;
+  }
+  .plothead .h{font-family:var(--mono);font-size:10px;color:var(--ink-faint);
+    text-transform:uppercase;letter-spacing:0.14em}
+  .plot{position:absolute;inset:0}
+
+  /* ---- dropzone / empty ---- */
+  .drop{
+    position:absolute;inset:0;z-index:600;display:flex;align-items:center;justify-content:center;
+    padding:24px;text-align:center;background:var(--bg);
+  }
+  .drop.hide{display:none}
+  .drop.over .dz{border-color:var(--accent);background:rgba(255,140,66,.05)}
+  .dz{
+    max-width:420px;width:100%;border:1.5px dashed var(--line);border-radius:14px;
+    padding:44px 32px;transition:border-color .15s,background .15s;cursor:pointer;
+  }
+  .dz .ico{font-family:var(--mono);font-size:30px;color:var(--accent);margin-bottom:14px}
+  .dz h2{font-family:var(--disp);font-weight:600;font-size:20px;margin:0 0 8px;letter-spacing:-0.01em}
+  .dz p{color:var(--ink-dim);margin:0 0 4px;font-size:13px}
+  .dz .hint{font-family:var(--mono);font-size:11px;color:var(--ink-faint);margin-top:14px}
+  .dz.err{border-color:#8a3a3a;background:rgba(233,86,63,.06)}
+  .dz.err .ico{color:#e8563f}
+
+  .whole-drop{position:fixed;inset:0;z-index:2000;display:none;
+    align-items:center;justify-content:center;background:rgba(11,15,20,.9);
+    border:2px dashed var(--accent)}
+  .whole-drop.show{display:flex}
+  .whole-drop span{font-family:var(--disp);font-size:22px;color:var(--accent)}
+
+  .foot{
+    padding:8px 22px;border-top:1px solid var(--line);background:var(--panel-2);
+    font-family:var(--mono);font-size:10px;color:var(--ink-faint);
+    display:flex;justify-content:space-between;flex-wrap:wrap;gap:8px;
+  }
+  a{color:var(--ink-dim)}
+</style>
+</head>
+<body>
+
+  <header class="topbar">
+    <div class="brand">
+      <span class="mark">FLIGHT<span class="dot">·</span>VIEW</span>
+      <span class="sub">GPX track visualiser</span>
+    </div>
+    <span class="filetag" id="filetag"></span>
+    <button class="logbtn" id="logbtn" disabled>Flight log</button>
+    <button class="loadbtn" id="loadbtn">Load flight</button>
+    <input type="file" id="fileinput" accept=".gpx,.bfl,.bbl,.xml,application/gpx+xml" style="display:none">
+  </header>
+
+  <div class="stats empty" id="stats"></div>
+
+  <main class="stage">
+    <section class="mapwrap">
+      <div id="map"></div>
+      <div class="basemap" id="basemap">
+        <button data-bm="dark" class="on">Dark</button>
+        <button data-bm="light">Light</button>
+        <button data-bm="sat">Satellite</button>
+      </div>
+      <div class="legend" id="legend" style="display:none">
+        <div class="lt">Altitude</div>
+        <div class="bar"></div>
+        <div class="lr"><span id="legLo">—</span><span id="legHi">—</span></div>
+      </div>
+      <div class="drop" id="drop">
+        <div class="dz" id="dz">
+          <div class="ico">⤓</div>
+          <h2 id="dzTitle">Drop your flight log</h2>
+          <p id="dzMsg">Drag a <b>.gpx</b> or raw Betaflight <b>.bfl / .bbl</b> here, or click to browse.</p>
+          <div class="hint">Everything runs in your browser — nothing is uploaded.</div>
+        </div>
+      </div>
+    </section>
+
+    <section class="right">
+      <div class="plotpanel">
+        <div class="plothead"><span class="h">Elevation profile</span></div>
+        <div class="plot" id="elev"></div>
+      </div>
+      <div class="plotpanel">
+        <div class="plothead"><span class="h">Speed &nbsp;·&nbsp; ground</span></div>
+        <div class="plot" id="speed"></div>
+      </div>
+      <div class="plotpanel">
+        <div class="plothead"><span class="h">3D path</span></div>
+        <div class="plot" id="threed"></div>
+      </div>
+    </section>
+  </main>
+
+  <div class="whole-drop" id="wholeDrop"><span>Release to load flight</span></div>
+
+  <div class="backdrop" id="backdrop">
+    <div class="sheet" id="logbook" role="dialog" aria-label="Flight log">
+      <div class="sheet-hd">
+        <h2>Flight Log</h2>
+        <span class="craft" id="lbCraft"></span>
+      </div>
+      <div class="logrows" id="lbRows"></div>
+      <div class="loc-note" id="lbLocNote">Location lookup sends the launch coordinates to postcodes.io and OpenStreetMap. Nothing else leaves your browser.</div>
+      <div class="sheet-ft">
+        <button class="look" id="lbLookup">Look up location</button>
+        <button class="csv" id="lbCsv">Save CSV</button>
+        <button class="print" id="lbPrint">Print / PDF</button>
+        <button id="lbClose">Close</button>
+      </div>
+    </div>
+  </div>
+
+  <footer class="foot">
+    <span id="footL">No flight loaded</span>
+    <span>Map © OpenStreetMap · CARTO · rendered locally</span>
+  </footer>
+
+<script>
+"use strict";
+
+/* ---------------- colour ramp (viridis) ---------------- */
+const VIRIDIS = [
+  [0.0 ,[68,1,84]],[0.25,[59,82,139]],[0.5,[33,145,140]],
+  [0.75,[94,201,98]],[1.0,[253,231,37]]
+];
+function ramp(t){
+  t=Math.max(0,Math.min(1,t));
+  for(let i=0;i<VIRIDIS.length-1;i++){
+    const [a,ca]=VIRIDIS[i],[b,cb]=VIRIDIS[i+1];
+    if(t>=a&&t<=b){
+      const f=(t-a)/(b-a||1);
+      const r=Math.round(ca[0]+(cb[0]-ca[0])*f);
+      const g=Math.round(ca[1]+(cb[1]-ca[1])*f);
+      const bl=Math.round(ca[2]+(cb[2]-ca[2])*f);
+      return `rgb(${r},${g},${bl})`;
+    }
+  }
+  return 'rgb(253,231,37)';
+}
+
+/* ---------------- geo helpers ---------------- */
+const R=6371000;
+function haversine(a,b){
+  const dLat=(b.lat-a.lat)*Math.PI/180, dLon=(b.lon-a.lon)*Math.PI/180;
+  const la1=a.lat*Math.PI/180, la2=b.lat*Math.PI/180;
+  const h=Math.sin(dLat/2)**2+Math.cos(la1)*Math.cos(la2)*Math.sin(dLon/2)**2;
+  return 2*R*Math.asin(Math.sqrt(h));
+}
+
+/* ---------------- GPX parse ---------------- */
+function parseGPX(text){
+  const xml=new DOMParser().parseFromString(text,"application/xml");
+  if(xml.querySelector("parsererror")) throw new Error("That file isn't valid XML.");
+  let nodes=[...xml.getElementsByTagName("trkpt")];
+  if(!nodes.length) nodes=[...xml.getElementsByTagName("rtept")];
+  if(!nodes.length) nodes=[...xml.getElementsByTagName("wpt")];
+  if(!nodes.length) throw new Error("No track points (<trkpt>) found in this GPX.");
+
+  const pts=[];
+  for(const n of nodes){
+    const lat=parseFloat(n.getAttribute("lat"));
+    const lon=parseFloat(n.getAttribute("lon"));
+    if(!isFinite(lat)||!isFinite(lon)) continue;
+    const eleEl=n.getElementsByTagName("ele")[0];
+    const timeEl=n.getElementsByTagName("time")[0];
+    const ele=eleEl?parseFloat(eleEl.textContent):null;
+    const t=timeEl?new Date(timeEl.textContent.trim()):null;
+    pts.push({lat,lon,ele:isFinite(ele)?ele:null,t:(t&&!isNaN(t))?t:null});
+  }
+  if(pts.length<2) throw new Error("Need at least two valid points to draw a path.");
+  const out=finalize(pts);
+  out.meta={ source:'GPX', craft:null, firmware:null, board:null,
+    startDate:(pts[0].t instanceof Date)?pts[0].t:null };
+  return out;
+}
+
+// cumulative ground + 3D distance; shared by every input format
+function finalize(pts){
+  let d2=0,d3=0;
+  pts[0].dist=0; pts[0].dist3d=0;
+  for(let i=1;i<pts.length;i++){
+    const seg=haversine(pts[i-1],pts[i]);
+    d2+=seg;
+    const dz=(pts[i].ele!=null&&pts[i-1].ele!=null)?(pts[i].ele-pts[i-1].ele):0;
+    d3+=Math.sqrt(seg*seg+dz*dz);
+    pts[i].dist=d2; pts[i].dist3d=d3;
+  }
+  return pts;
+}
+
+/* ---------------- Betaflight/INAV blackbox decoder (GPS-focused) ----------------
+   Validated byte-exact against the reference blackbox_decode across all fields.
+   Decodes entirely in the browser — the .BFL never leaves your machine.        */
+function decodeBFL(bytes){
+  let pos=0; const len=bytes.length; const NL=0x0A;
+  function rdByte(){ return bytes[pos++]; }
+  function u32VB(){ let r=0,s=1; for(let i=0;i<5;i++){ const c=bytes[pos++]; r+=(c&0x7f)*s; if(c<128) return r; s*=128; } return r; }
+  function zz(u){ return (u%2===0)? u/2 : -(u+1)/2; }
+  function s32VB(){ return zz(u32VB()); }
+  const sx2=b=>(b&0x02)?(b|~0x03):b&0x03, sx4=b=>(b&0x08)?(b|~0x0F):b&0x0F,
+        sx6=b=>(b&0x20)?(b|~0x3F):b&0x3F, sx14=w=>(w&0x2000)?(w|~0x3FFF):w&0x3FFF,
+        sx24=u=>(u&0x800000)?(u|~0xFFFFFF):u, toI32=v=>v|0, toU32=v=>v>>>0;
+  function latin1(a,b){ let s=''; for(let k=a;k<b;k++) s+=String.fromCharCode(bytes[k]); return s; }
+
+  function tag2_3s32(out){
+    let lead=rdByte();
+    switch(lead>>6){
+      case 0: out[0]=sx2(lead>>4); out[1]=sx2(lead>>2); out[2]=sx2(lead); break;
+      case 1: out[0]=sx4(lead&0x0F); lead=rdByte(); out[1]=sx4(lead>>4); out[2]=sx4(lead&0x0F); break;
+      case 2: out[0]=sx6(lead&0x3F); out[1]=sx6(rdByte()&0x3F); out[2]=sx6(rdByte()&0x3F); break;
+      case 3: for(let i=0;i<3;i++){ switch(lead&0x03){
+                case 0: out[i]=(rdByte()<<24>>24); break;
+                case 1:{ const b1=rdByte(),b2=rdByte(); out[i]=((b1|(b2<<8))<<16>>16); break; }
+                case 2:{ const b1=rdByte(),b2=rdByte(),b3=rdByte(); out[i]=sx24(b1|(b2<<8)|(b3<<16)); break; }
+                case 3:{ const b1=rdByte(),b2=rdByte(),b3=rdByte(),b4=rdByte(); out[i]=(b1|(b2<<8)|(b3<<16)|(b4<<24)); break; }
+              } lead>>=2; } break;
+    }
+  }
+  function tag8_4s16(out){
+    let sel=rdByte(), nib=0, buf=0;
+    for(let i=0;i<4;i++){
+      switch(sel&0x03){
+        case 0: out[i]=0; break;
+        case 1: if(nib===0){ buf=rdByte(); out[i]=sx4(buf>>4); nib=1; } else { out[i]=sx4(buf&0x0F); nib=0; } break;
+        case 2: if(nib===0){ out[i]=(rdByte()<<24>>24); } else { let c1=(buf<<4)&0xFF; buf=rdByte(); c1|=buf>>4; out[i]=(c1<<24>>24); } break;
+        case 3: if(nib===0){ const c1=rdByte(),c2=rdByte(); out[i]=(((c1<<8)|c2)<<16>>16); }
+                else { const c1=rdByte(),c2=rdByte(); out[i]=(((buf<<12)|(c1<<4)|(c2>>4))<<16>>16); buf=c2; } break;
+      }
+      sel>>=2;
+    }
+  }
+  function tag8_8svb(out,count){
+    if(count===1){ out[0]=s32VB(); return; }
+    let h=rdByte(); for(let i=0;i<8;i++,h>>=1) out[i]=(h&1)?s32VB():0;
+  }
+
+  const H={ minthrottle:0, vbatref:0, motorLow:0, start:null, craft:null, firmware:null, board:null };
+  const defs={};
+  const ensure=t=>defs[t]||(defs[t]={name:[],signed:[],pred:[],enc:[]});
+  const nums=s=>s.split(',').map(x=>parseInt(x,10));
+  while(pos+1<len && bytes[pos]===0x48 && bytes[pos+1]===0x20){
+    let e=pos; while(e<len && bytes[e]!==NL) e++;
+    const line=latin1(pos+2,e); pos=e+1;
+    const ci=line.indexOf(':'); if(ci<0) continue;
+    const key=line.slice(0,ci), val=line.slice(ci+1);
+    if(key.startsWith('Field ')){
+      const ft=key[6], what=key.slice(8), d=ensure(ft);
+      if(what==='name') d.name=val.split(',');
+      else if(what==='signed') d.signed=nums(val);
+      else if(what==='predictor'){ const p=nums(val); let seen=false;
+        for(let i=0;i<p.length;i++){ if(p[i]===7){ if(seen) p[i]=256; else seen=true; } } d.pred=p; }
+      else if(what==='encoding') d.enc=nums(val);
+    }
+    else if(key==='minthrottle') H.minthrottle=parseInt(val,10)||0;
+    else if(key==='vbatref') H.vbatref=parseInt(val,10)||0;
+    else if(key==='motorOutput') H.motorLow=parseInt(val.split(',')[0],10)||0;
+    else if(key==='Log start datetime') H.start=val.trim();
+    else if(key==='Craft name') H.craft=val.trim()||null;
+    else if(key==='Firmware revision') H.firmware=val.trim()||null;
+    else if(key==='Board information') H.board=val.trim()||null;
+  }
+  if(!defs['G']) throw new Error("This blackbox log has no GPS fields — was a GPS module connected and logging enabled?");
+  if(defs['P'] && defs['I'] && defs['P'].name.length===0){ defs['P'].name=defs['I'].name; defs['P'].signed=defs['I'].signed; }
+
+  const idxOf=(t,n)=>{ const d=defs[t]; return d?d.name.indexOf(n):-1; };
+  const gi={ time:idxOf('G','time'), sat:idxOf('G','GPS_numSat'), lat:idxOf('G','GPS_coord[0]'),
+    lon:idxOf('G','GPS_coord[1]'), alt:idxOf('G','GPS_altitude'), spd:idxOf('G','GPS_speed'), crs:idxOf('G','GPS_ground_course') };
+  const hi={ h0:idxOf('H','GPS_home[0]'), h1:idxOf('H','GPS_home[1]') };
+  const motor0=idxOf('I','motor[0]'), TIME=1;
+
+  let mainPrev=null, mainPrev2=null, gpsHome=[0,0];
+  function applyPred(fi,p,value,cur){
+    switch(p){
+      case 1: if(mainPrev) value+=mainPrev[fi]; break;
+      case 2: if(mainPrev) value+=2*mainPrev[fi]-mainPrev2[fi]; break;
+      case 3: if(mainPrev) value+=Math.trunc((mainPrev[fi]+mainPrev2[fi])/2); break;
+      case 4: value+=H.minthrottle; break;
+      case 5: value+=cur[motor0]; break;
+      case 7: value+=gpsHome[0]; break;
+      case 256: value+=gpsHome[1]; break;
+      case 8: value+=1500; break;
+      case 9: value+=H.vbatref; break;
+      case 10: value+=(mainPrev?mainPrev[TIME]:0); break;
+      case 11: value+=H.motorLow; break;
+    }
+    return value;
+  }
+  const fin=(i,v,sg)=>sg[i]?toI32(v):toU32(v);
+  function parseFrame(ft){
+    const d=defs[ft], enc=d.enc, pred=d.pred, sg=d.signed, n=d.name.length;
+    const frame=new Array(n).fill(0), vals=new Array(8); let i=0;
+    while(i<n){
+      if(pred[i]===6){ frame[i]=1+(mainPrev?mainPrev[i]:0); i++; continue; }
+      const e=enc[i];
+      if(e===0){ frame[i]=fin(i,applyPred(i,pred[i],s32VB(),frame),sg); i++; }
+      else if(e===1){ frame[i]=fin(i,applyPred(i,pred[i],u32VB(),frame),sg); i++; }
+      else if(e===3){ frame[i]=fin(i,applyPred(i,pred[i],-sx14(u32VB()),frame),sg); i++; }
+      else if(e===9){ frame[i]=fin(i,applyPred(i,pred[i],0,frame),sg); i++; }
+      else if(e===7){ tag2_3s32(vals); for(let j=0;j<3;j++,i++) frame[i]=fin(i,applyPred(i,pred[i],vals[j],frame),sg); }
+      else if(e===8){ tag8_4s16(vals); for(let j=0;j<4;j++,i++) frame[i]=fin(i,applyPred(i,pred[i],vals[j],frame),sg); }
+      else if(e===6){ let g=1; while(i+g<n && g<8 && enc[i+g]===6) g++; tag8_8svb(vals,g);
+                      for(let j=0;j<g;j++,i++) frame[i]=fin(i,applyPred(i,pred[i],vals[j],frame),sg); }
+      else throw new Error('Unsupported blackbox encoding '+e+' in frame '+ft);
+    }
+    return frame;
+  }
+
+  const raw=[]; let ended=false, firstMainTime=null;
+  function parseEvent(){
+    const et=rdByte();
+    if(et===0) u32VB();
+    else if(et===13){ const f=rdByte(); if(f>127) pos+=4; else s32VB(); }
+    else if(et===14){ u32VB(); u32VB(); }
+    else if(et===30){ u32VB(); u32VB(); }
+    else if(et===255){ pos+=11; ended=true; }
+    else ended=true;
+  }
+  while(pos<len && !ended){
+    const t=bytes[pos];
+    if(t===0x49){ pos++; const f=parseFrame('I'); mainPrev=f; mainPrev2=f; if(firstMainTime===null) firstMainTime=f[TIME]; }
+    else if(t===0x50){ pos++; const f=parseFrame('P'); mainPrev2=mainPrev; mainPrev=f; if(firstMainTime===null) firstMainTime=f[TIME]; }
+    else if(t===0x47){ pos++; const g=parseFrame('G');
+      raw.push({ t_us:g[gi.time], lat:g[gi.lat]/1e7, lon:g[gi.lon]/1e7, ele:g[gi.alt]/10 }); }
+    else if(t===0x48){ pos++; const h=parseFrame('H'); gpsHome=[h[hi.h0],h[hi.h1]]; }
+    else if(t===0x53){ pos++; parseFrame('S'); }
+    else if(t===0x45){ pos++; parseEvent(); }
+    else ended=true;
+  }
+  return { points:raw, start:H.start, firstMainTime,
+    craft:H.craft, firmware:H.firmware, board:H.board };
+}
+
+function parseBFL(bytes){
+  const r=decodeBFL(bytes);
+  if(r.points.length<2) throw new Error("No usable GPS track in this blackbox log (need a GPS fix — check the log was recorded with GPS).");
+  const base=r.start?Date.parse(r.start):NaN;
+  const anchor=(r.firstMainTime!=null)?r.firstMainTime:r.points[0].t_us;
+  const pts=r.points.map(p=>({ lat:p.lat, lon:p.lon, ele:p.ele,
+    t: isFinite(base) ? new Date(base+(p.t_us-anchor)/1000) : new Date(p.t_us/1000) }));
+  const out=finalize(pts);
+  out.meta={ source:'Betaflight blackbox', craft:r.craft, firmware:r.firmware, board:r.board,
+    startDate: isFinite(base)?new Date(base):null };
+  return out;
+}
+
+
+/* ---------------- stats ---------------- */
+function fmt(n,dp=0){ return n.toLocaleString('en-GB',{minimumFractionDigits:dp,maximumFractionDigits:dp}); }
+
+function computeStats(pts){
+  const eles=pts.map(p=>p.ele).filter(e=>e!=null);
+  const hasEle=eles.length>0;
+
+  // furthest horizontal distance from the launch point (VLOS / logbook figure)
+  let maxFromHome=0;
+  for(let i=1;i<pts.length;i++){ const d=haversine(pts[0],pts[i]); if(d>maxFromHome) maxFromHome=d; }
+  const hasTime=pts[0].t&&pts[pts.length-1].t;
+
+  const maxEle=hasEle?Math.max(...eles):null;
+  const minEle=hasEle?Math.min(...eles):null;
+  const startEle=pts.find(p=>p.ele!=null)?.ele ?? null;
+
+  // Windowed (centred) ground speed & climb rate — high-rate GPS is too noisy point-to-point.
+  const n=pts.length, H=5;   // ~±5 samples ≈ 1s at 10Hz
+  let dur=null, maxSpeed=0, maxClimb=0, avgSpeed=null, spd=null;
+  if(hasTime){
+    dur=(pts[n-1].t-pts[0].t)/1000;
+    spd=new Array(n).fill(0);
+    for(let i=0;i<n;i++){
+      const a=Math.max(0,i-H), b=Math.min(n-1,i+H);
+      const dt=(pts[b].t-pts[a].t)/1000;
+      if(dt>0){
+        spd[i]=haversine(pts[a],pts[b])/dt;                 // horizontal ground speed (m/s)
+        if(hasEle&&pts[a].ele!=null&&pts[b].ele!=null)
+          maxClimb=Math.max(maxClimb,Math.abs(pts[b].ele-pts[a].ele)/dt);
+      } else if(i>0) spd[i]=spd[i-1];
+    }
+    maxSpeed=Math.max(...spd);
+    if(dur>0) avgSpeed=pts[n-1].dist/dur;                    // mean over whole log
+  }
+  return {
+    points:n,
+    dist:pts[n-1].dist,
+    dist3d:pts[n-1].dist3d,
+    hasEle,maxEle,minEle,startEle,
+    maxAGL:(hasEle&&startEle!=null)?maxEle-startEle:null,
+    hasTime,dur,maxSpeed,maxClimb,avgSpeed,spd,maxFromHome,
+    startPt:{lat:pts[0].lat,lon:pts[0].lon},
+    startTime:(pts[0].t instanceof Date)?pts[0].t:null,
+    endTime:(pts[pts.length-1].t instanceof Date)?pts[pts.length-1].t:null
+  };
+}
+
+function hms(s){
+  s=Math.round(s); const h=Math.floor(s/3600),m=Math.floor((s%3600)/60),ss=s%60;
+  return (h?h+':':'')+String(m).padStart(h?2:1,'0')+':'+String(ss).padStart(2,'0');
+}
+
+function renderStats(s){
+  const el=document.getElementById('stats');
+  const cell=(k,v,u)=>`<div class="stat"><div class="k">${k}</div><div class="v">${v}${u?`<span class="u">${u}</span>`:''}</div></div>`;
+  let html='';
+  html+=cell('Distance', fmt(s.dist/1000,2),'km');
+  if(s.hasTime) html+=cell('Duration', hms(s.dur),'');
+  if(s.hasEle){
+    html+=cell('Max alt', fmt(s.maxEle,0),'m');
+    if(s.maxAGL!=null) html+=cell('Max AGL', fmt(s.maxAGL,0),'m');
+    html+=cell('Alt range', fmt(s.maxEle-s.minEle,0),'m');
+  }
+  if(s.hasTime){
+    html+=cell('Top speed', fmt(s.maxSpeed,1),'m/s');
+    html+=cell('Top speed', fmt(s.maxSpeed*2.23694,1),'mph');
+    if(s.avgSpeed!=null) html+=cell('Avg speed', fmt(s.avgSpeed,1),'m/s');
+    if(s.hasEle) html+=cell('Max climb', fmt(s.maxClimb,1),'m/s');
+  }
+  html+=cell('Points', fmt(s.points,0),'');
+  el.innerHTML=html; el.classList.remove('empty');
+
+  document.getElementById('footL').textContent =
+    `${fmt(s.points,0)} pts · ${fmt(s.dist/1000,2)} km` + (s.hasEle?` · ${fmt(s.maxEle,0)} m ceiling`:` · no elevation data`);
+}
+
+/* ---------------- map ---------------- */
+let map, hoverMarker, trackLayer, baseLayers, currentBase;
+function initMap(){
+  map=L.map('map',{zoomControl:true,attributionControl:true}).setView([51.75,-1.48],13);
+  baseLayers={
+    dark:L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png',
+      {attribution:'© OpenStreetMap · © CARTO',subdomains:'abcd',maxZoom:20}),
+    light:L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png',
+      {attribution:'© OpenStreetMap · © CARTO',subdomains:'abcd',maxZoom:20}),
+    sat:L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
+      {attribution:'© Esri · Maxar · Earthstar Geographics',maxZoom:19})
+  };
+  currentBase='dark';
+  baseLayers.dark.addTo(map);
+  document.getElementById('basemap').addEventListener('click',e=>{
+    const b=e.target.closest('button'); if(!b) return;
+    const key=b.dataset.bm; if(key===currentBase) return;
+    map.removeLayer(baseLayers[currentBase]);
+    baseLayers[key].addTo(map); currentBase=key;
+    [...e.currentTarget.children].forEach(c=>c.classList.toggle('on',c===b));
+  });
+}
+function renderMap(pts,s){
+  if(trackLayer) map.removeLayer(trackLayer);
+  const eles=pts.map(p=>p.ele);
+  const lo=s.hasEle?s.minEle:0, hi=s.hasEle?s.maxEle:1, span=(hi-lo)||1;
+
+  const segs=[];
+  for(let i=1;i<pts.length;i++){
+    const e=(pts[i].ele!=null?pts[i].ele:(pts[i-1].ele!=null?pts[i-1].ele:lo));
+    const col=s.hasEle?ramp((e-lo)/span):'#5ec962';
+    segs.push(L.polyline([[pts[i-1].lat,pts[i-1].lon],[pts[i].lat,pts[i].lon]],
+      {color:col,weight:3,opacity:0.92,lineCap:'round'}));
+  }
+  trackLayer=L.layerGroup(segs).addTo(map);
+
+  // start / end markers
+  L.circleMarker([pts[0].lat,pts[0].lon],{radius:5,color:'#0b0f14',weight:2,fillColor:'#5ec962',fillOpacity:1}).addTo(trackLayer).bindTooltip('Start');
+  L.circleMarker([pts[pts.length-1].lat,pts[pts.length-1].lon],{radius:5,color:'#0b0f14',weight:2,fillColor:'#ff8c42',fillOpacity:1}).addTo(trackLayer).bindTooltip('End');
+
+  hoverMarker=L.circleMarker([pts[0].lat,pts[0].lon],
+    {radius:7,color:'#fff',weight:2,fillColor:'#fff',fillOpacity:.25,className:'hovermk'});
+
+  // 500 m VLOS range ring around the take-off point
+  const ring=L.circle([pts[0].lat,pts[0].lon],
+    {radius:500,color:'#ff8c42',weight:1.4,opacity:.85,dashArray:'6 5',
+     fill:true,fillColor:'#ff8c42',fillOpacity:.04});
+  ring.addTo(trackLayer).bindTooltip('500 m range from take-off',{sticky:true});
+  L.marker([pts[0].lat+500/111320, pts[0].lon],
+    {interactive:false, icon:L.divIcon({className:'ring-label',html:'500 m',iconSize:[42,15],iconAnchor:[21,8]})}).addTo(trackLayer);
+
+  const bounds=L.latLngBounds(pts.map(p=>[p.lat,p.lon]));
+  bounds.extend(ring.getBounds());   // keep the whole range ring in view
+  map.fitBounds(bounds,{padding:[36,36]});
+
+  const leg=document.getElementById('legend');
+  if(s.hasEle){
+    leg.style.display='block';
+    document.getElementById('legLo').textContent=fmt(s.minEle,0)+' m';
+    document.getElementById('legHi').textContent=fmt(s.maxEle,0)+' m';
+  } else leg.style.display='none';
+}
+
+/* ---------------- plots ---------------- */
+const PLOT_LAYOUT_BASE={
+  paper_bgcolor:'rgba(0,0,0,0)',plot_bgcolor:'rgba(0,0,0,0)',
+  font:{family:'IBM Plex Mono, monospace',size:10,color:'#8a97a6'},
+  margin:{l:48,r:14,t:34,b:34}
+};
+const PLOT_CONF={displayModeBar:false,responsive:true};
+
+function renderElevation(pts,s){
+  const el=document.getElementById('elev');
+  if(!s.hasEle){
+    Plotly.purge(el);
+    el.innerHTML='<div style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;color:var(--ink-faint);font-family:var(--mono);font-size:12px">No elevation data in this file</div>';
+    return;
+  }
+  el.innerHTML='';
+  const x=pts.map(p=>p.dist/1000), y=pts.map(p=>p.ele);
+  const lo=s.minEle,hi=s.maxEle,span=(hi-lo)||1;
+  const colors=y.map(e=>ramp((e-lo)/span));
+  const trace={
+    x,y,type:'scatter',mode:'lines',
+    line:{color:'#ff8c42',width:0},
+    fill:'tozeroy',fillcolor:'rgba(255,140,66,0.06)',hoverinfo:'skip'
+  };
+  const startEle=s.startEle, hasAGL=(startEle!=null);
+  const dots={
+    x,y,type:'scatter',mode:'markers',
+    marker:{size:3.5,color:colors},
+    customdata:pts.map((p,i)=>[i, (hasAGL&&p.ele!=null)?p.ele-startEle:null]),
+    hovertemplate: hasAGL
+      ? '%{y:.0f} m MSL &nbsp;·&nbsp; %{customdata[1]:.0f} m above TO<br>%{x:.2f} km<extra></extra>'
+      : '%{y:.0f} m &nbsp; @ %{x:.2f} km<extra></extra>'
+  };
+  const agl = hasAGL? startEle+120 : null;
+  const yhi = hasAGL? Math.max(hi,agl) : hi;
+  const pad = Math.max(2,(yhi-lo)*0.08);
+  const yLo=lo-pad, yHi=yhi+pad;
+  const layout=Object.assign({},PLOT_LAYOUT_BASE,{
+    margin: hasAGL?{l:48,r:52,t:34,b:34}:{l:48,r:14,t:34,b:34},
+    xaxis:{title:{text:'distance (km)',font:{size:9}},gridcolor:'#1a232e',zeroline:false},
+    yaxis:{title:{text:hasAGL?'MSL (m)':'alt (m)',font:{size:9}},gridcolor:'#1a232e',zeroline:false,range:[yLo,yHi]},
+    showlegend:false
+  });
+  const traces=[trace,dots];
+  if(hasAGL){
+    // right-hand scale: altitude above take-off point (fixed offset from MSL)
+    layout.yaxis2={title:{text:'above take-off (m)',font:{size:9}},overlaying:'y',side:'right',
+      range:[yLo-startEle, yHi-startEle],showgrid:false,zeroline:false,color:'#8a97a6'};
+    traces.push({x:[x[0],x[x.length-1]],y:[yLo-startEle,yHi-startEle],yaxis:'y2',mode:'lines',line:{width:0},hoverinfo:'skip'});
+    layout.shapes=[{type:'line',xref:'paper',x0:0,x1:1,yref:'y',y0:agl,y1:agl,
+      line:{color:'#e8563f',width:1.2,dash:'dash'}}];
+    layout.annotations=[{xref:'paper',x:0.012,y:agl,yref:'y',text:'120m above take off point',showarrow:false,
+      xanchor:'left',yanchor:'bottom',font:{size:9,color:'#e8563f',family:'IBM Plex Mono, monospace'},
+      bgcolor:'rgba(11,15,20,.7)',borderpad:2}];
+  }
+  Plotly.newPlot(el,traces,layout,PLOT_CONF);
+
+  el.on('plotly_hover',ev=>{
+    const p=ev.points.find(pt=>pt.data.mode==='markers'); if(!p)return;
+    const i=p.customdata[0]; if(hoverMarker){hoverMarker.setLatLng([pts[i].lat,pts[i].lon]); if(!map.hasLayer(hoverMarker))hoverMarker.addTo(map);}
+  });
+  el.on('plotly_unhover',()=>{ if(hoverMarker&&map.hasLayer(hoverMarker)) map.removeLayer(hoverMarker); });
+}
+
+function renderSpeed(pts,s){
+  const el=document.getElementById('speed');
+  if(!s.hasTime||!s.spd){
+    Plotly.purge(el);
+    el.innerHTML='<div style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;color:var(--ink-faint);font-family:var(--mono);font-size:12px">No timestamps — speed can’t be derived</div>';
+    return;
+  }
+  el.innerHTML='';
+  const x=pts.map(p=>p.dist/1000);
+  const ms=s.spd, MPH=2.23694;
+  const top=(Math.max(...ms)*1.08)||1;
+  const line={
+    x,y:ms,type:'scatter',mode:'lines',yaxis:'y',
+    line:{color:'#ff8c42',width:1.4},fill:'tozeroy',fillcolor:'rgba(255,140,66,0.06)',hoverinfo:'skip'
+  };
+  const dots={
+    x,y:ms,type:'scatter',mode:'markers',yaxis:'y',
+    marker:{size:2,color:'rgba(255,140,66,0)'},
+    customdata:pts.map((p,i)=>[i,ms[i]*MPH]),
+    hovertemplate:'%{y:.1f} m/s &nbsp;·&nbsp; %{customdata[1]:.1f} mph<br>%{x:.2f} km<extra></extra>'
+  };
+  // transparent trace on the right axis so the mph scale renders and stays locked to m/s
+  const ghost={x:[x[0],x[x.length-1]],y:[0,top*MPH],type:'scatter',mode:'lines',
+    yaxis:'y2',line:{width:0},hoverinfo:'skip'};
+  const layout=Object.assign({},PLOT_LAYOUT_BASE,{
+    margin:{l:48,r:50,t:34,b:34},
+    xaxis:{title:{text:'distance (km)',font:{size:9}},gridcolor:'#1a232e',zeroline:false},
+    yaxis:{title:{text:'m/s',font:{size:9}},range:[0,top],gridcolor:'#1a232e',zeroline:false},
+    yaxis2:{title:{text:'mph',font:{size:9}},range:[0,top*MPH],overlaying:'y',side:'right',
+      showgrid:false,zeroline:false,color:'#8a97a6'},
+    showlegend:false
+  });
+  Plotly.newPlot(el,[line,dots,ghost],layout,PLOT_CONF);
+
+  el.on('plotly_hover',ev=>{
+    const p=ev.points.find(pt=>pt.data.mode==='markers'); if(!p)return;
+    const i=p.customdata[0];
+    if(hoverMarker){hoverMarker.setLatLng([pts[i].lat,pts[i].lon]); if(!map.hasLayer(hoverMarker))hoverMarker.addTo(map);}
+  });
+  el.on('plotly_unhover',()=>{ if(hoverMarker&&map.hasLayer(hoverMarker)) map.removeLayer(hoverMarker); });
+}
+
+function render3D(pts,s){
+  const el=document.getElementById('threed');
+  el.innerHTML='';
+  const lat=pts.map(p=>p.lat),lon=pts.map(p=>p.lon);
+  const z=s.hasEle?pts.map(p=>p.ele??s.minEle):pts.map(()=>0);
+  const cvals=s.hasEle?z:lat;
+  const trace={
+    type:'scatter3d',mode:'lines',
+    x:lon,y:lat,z,
+    line:{width:4,color:cvals,colorscale:'Viridis'},
+    hovertemplate:'%{z:.0f} m<extra></extra>'
+  };
+  const layout=Object.assign({},PLOT_LAYOUT_BASE,{
+    margin:{l:0,r:0,t:34,b:0},
+    scene:{
+      xaxis:{title:'lon',color:'#5b6775',gridcolor:'#1a232e',showspikes:false,backgroundcolor:'rgba(0,0,0,0)'},
+      yaxis:{title:'lat',color:'#5b6775',gridcolor:'#1a232e',showspikes:false,backgroundcolor:'rgba(0,0,0,0)'},
+      zaxis:{title:'alt (m)',color:'#5b6775',gridcolor:'#1a232e',showspikes:false,backgroundcolor:'rgba(0,0,0,0)'},
+      aspectmode:'auto',
+      camera:{eye:{x:1.5,y:-1.5,z:0.9}}
+    }
+  });
+  Plotly.newPlot(el,[trace],layout,PLOT_CONF);
+}
+
+/* ---------------- orchestration ---------------- */
+let CURRENT=null;
+function render(pts,name){
+  const s=computeStats(pts);
+  CURRENT={ s, meta:pts.meta||{source:'—',craft:null,firmware:null,board:null,startDate:null}, name, location:null };
+  document.getElementById('drop').classList.add('hide');
+  document.getElementById('filetag').textContent=name||'';
+  document.getElementById('logbtn').disabled=false;
+  renderStats(s); renderMap(pts,s); renderElevation(pts,s); renderSpeed(pts,s); render3D(pts,s);
+  setTimeout(()=>{ map.invalidateSize();
+    Plotly.Plots.resize(document.getElementById('elev'));
+    Plotly.Plots.resize(document.getElementById('speed'));
+    Plotly.Plots.resize(document.getElementById('threed')); },120);
+}
+
+/* ---------------- logbook ---------------- */
+const MON=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+const p2=n=>String(n).padStart(2,'0');
+const dateUTC=d=>d?`${d.getUTCDate()} ${MON[d.getUTCMonth()]} ${d.getUTCFullYear()}`:null;
+const timeUTC=d=>d?`${p2(d.getUTCHours())}:${p2(d.getUTCMinutes())}:${p2(d.getUTCSeconds())} UTC`:null;
+const timeLocal=d=>d?d.toLocaleTimeString('en-GB',{hour:'2-digit',minute:'2-digit'}):null;
+
+function buildLogbook(){
+  const {s,meta}=CURRENT;
+  const rows=[];
+  const add=(k,v,sub)=>rows.push(`<div class="logrow"><div class="k">${k}</div><div class="v">${v}${sub?` <span class="sub">${sub}</span>`:''}</div></div>`);
+  const dt=s.startTime||meta.startDate;
+  add('Date', dt?dateUTC(dt):'—');
+  add('Take-off', s.startTime?timeUTC(s.startTime):'—', s.startTime?`(${timeLocal(s.startTime)} local · approx, first GPS fix)`:'');
+  add('Landing', s.endTime?timeUTC(s.endTime):'—', s.endTime?`(${timeLocal(s.endTime)} local · approx)`:'');
+  add('Duration', s.hasTime?hms(s.dur):'—', s.hasTime?'GPS track':'no timestamps');
+  add('Aircraft', meta.craft||'—');
+  add('Launch position', `${s.startPt.lat.toFixed(5)}, ${s.startPt.lon.toFixed(5)}`);
+  add('Location', CURRENT.location||'<span class="sub">— tap “Look up location”</span>');
+  if(s.hasEle){
+    add('Max height (AGL)', fmt(s.maxAGL,0)+' m', 'above launch');
+    add('Max altitude', fmt(s.maxEle,0)+' m', 'GPS / MSL');
+  }
+  add('Max distance', fmt(s.maxFromHome,0)+' m', 'from launch');
+  if(s.hasTime) add('Top speed', fmt(s.maxSpeed,1)+' m/s', `${fmt(s.maxSpeed*2.23694,1)} mph`);
+  add('Distance flown', fmt(s.dist/1000,2)+' km');
+  if(meta.firmware) add('Firmware', meta.firmware);
+  if(meta.board) add('Board', meta.board);
+  add('Source', `${meta.source}${CURRENT.name?` · ${CURRENT.name}`:''}`);
+  document.getElementById('lbRows').innerHTML=rows.join('');
+  document.getElementById('lbCraft').textContent=meta.craft||meta.source||'';
+}
+function openLogbook(){ if(!CURRENT) return; buildLogbook(); document.getElementById('backdrop').classList.add('show'); }
+function closeLogbook(){ document.getElementById('backdrop').classList.remove('show'); }
+
+function csvCell(v){ v=(v==null?'':String(v)); return /[",\r\n]/.test(v)?'"'+v.replace(/"/g,'""')+'"':v; }
+async function saveCSV(){
+  if(!CURRENT) return;
+  const btn=document.getElementById('lbCsv'); const old=btn.textContent; btn.disabled=true; btn.textContent='Preparing…';
+  if(!CURRENT.loc){ try{ await lookupLocation(); }catch(e){} }
+  const s=CURRENT.s, meta=CURRENT.meta, loc=CURRENT.loc||{};
+  const d=s.startTime||meta.startDate;
+  // filename uses the pilot's LOCAL wall-clock (date + take-off time) so repeat flights don't collide
+  const ymd = d?`${d.getFullYear()}${p2(d.getMonth()+1)}${p2(d.getDate())}`:'nodate';
+  const hhmm = d?`${p2(d.getHours())}${p2(d.getMinutes())}`:'';
+  const isoDate = d?`${d.getUTCFullYear()}-${p2(d.getUTCMonth()+1)}-${p2(d.getUTCDate())}`:'';
+  const craft=(meta.craft||'flight').replace(/[^A-Za-z0-9-]+/g,'')||'flight';
+  const oc=(loc.outcode||'').replace(/[^A-Za-z0-9]+/g,'');
+  const fname=[craft,ymd,hhmm,oc].filter(Boolean).join('_')+'.csv';
+
+  const cols=[
+    ['Craft', meta.craft||''],
+    ['Date (UTC)', isoDate],
+    ['Take-off (UTC)', s.startTime?s.startTime.toISOString():''],
+    ['Landing (UTC)', s.endTime?s.endTime.toISOString():''],
+    ['Duration', s.hasTime?hms(s.dur):''],
+    ['Duration (s)', s.hasTime?Math.round(s.dur):''],
+    ['Launch lat', s.startPt.lat.toFixed(6)],
+    ['Launch lon', s.startPt.lon.toFixed(6)],
+    ['Nearest postcode', loc.postcode||''],
+    ['Outward code', loc.outcode||''],
+    ['Ward', loc.ward||''],
+    ['District', loc.district||''],
+    ['Place', loc.place||''],
+    ['Max height AGL (m)', s.hasEle?Math.round(s.maxAGL):''],
+    ['Max altitude MSL (m)', s.hasEle?Math.round(s.maxEle):''],
+    ['Max distance from launch (m)', Math.round(s.maxFromHome)],
+    ['Top speed (m/s)', s.hasTime?s.maxSpeed.toFixed(1):''],
+    ['Top speed (mph)', s.hasTime?(s.maxSpeed*2.23694).toFixed(1):''],
+    ['Avg speed (m/s)', (s.hasTime&&s.avgSpeed!=null)?s.avgSpeed.toFixed(1):''],
+    ['Distance flown (km)', (s.dist/1000).toFixed(2)],
+    ['GPS points', s.points],
+    ['Firmware', meta.firmware||''],
+    ['Board', meta.board||''],
+    ['Source file', CURRENT.name||'']
+  ];
+  const header=cols.map(c=>csvCell(c[0])).join(',');
+  const values=cols.map(c=>csvCell(c[1])).join(',');
+  const csv='\uFEFF'+header+'\r\n'+values+'\r\n';   // BOM so Excel reads UTF-8
+
+  const blob=new Blob([csv],{type:'text/csv;charset=utf-8'});
+  const url=URL.createObjectURL(blob);
+  const a=document.createElement('a'); a.href=url; a.download=fname;
+  document.body.appendChild(a); a.click();
+  setTimeout(()=>{ URL.revokeObjectURL(url); a.remove(); },100);
+  btn.textContent=old; btn.disabled=false;
+}
+
+function buildLocLabel(loc){
+  const bits=[];
+  if(loc.place) bits.push(loc.place);
+  if(loc.postcode) bits.push(`${loc.postcode} · ${[loc.ward,loc.district].filter(Boolean).join(', ')}${loc.dist!=null?` (${loc.dist} m)`:''}`);
+  else if(loc.outcode) bits.push(`nearest area ${loc.outcode}${loc.district?` · ${loc.district}`:''}`);
+  return bits.join(' — ') || 'No nearby match (remote or non-UK location)';
+}
+async function lookupLocation(){
+  if(!CURRENT) return null;
+  const btn=document.getElementById('lbLookup'); btn.disabled=true; btn.textContent='Looking up…';
+  const {lat,lon}=CURRENT.s.startPt;
+  const loc={postcode:null,outcode:null,ward:null,district:null,place:null,dist:null};
+  try{ const r=await fetch(`https://api.postcodes.io/postcodes?lon=${lon}&lat=${lat}&limit=1`);
+    if(r.ok){ const j=await r.json(); const p=j.result&&j.result[0];
+      if(p){ loc.postcode=p.postcode; loc.outcode=p.outcode; loc.ward=p.admin_ward; loc.district=p.admin_district; loc.dist=Math.round(p.distance); } } }catch(e){}
+  if(!loc.postcode){ try{ const r=await fetch(`https://api.postcodes.io/outcodes?lon=${lon}&lat=${lat}&limit=1`);
+    if(r.ok){ const j=await r.json(); const o=j.result&&j.result[0];
+      if(o){ loc.outcode=o.outcode; loc.district=(o.admin_district||[])[0]||null; } } }catch(e){} }
+  try{ const r=await fetch(`https://nominatim.openstreetmap.org/reverse?format=jsonv2&zoom=14&lat=${lat}&lon=${lon}`);
+    if(r.ok){ const j=await r.json(), a=j.address||{};
+      loc.place=[a.village||a.hamlet||a.town||a.suburb||a.locality||a.city, a.county, a.country].filter(Boolean).join(', ')||null; } }catch(e){}
+  CURRENT.loc=loc; CURRENT.location=buildLocLabel(loc);
+  btn.textContent='Look up location'; btn.disabled=false;
+  buildLogbook();
+  return loc;
+}
+function showBusy(title,msg){
+  const dz=document.getElementById('dz');
+  dz.classList.remove('err');
+  document.getElementById('drop').classList.remove('hide');
+  document.getElementById('dzTitle').textContent=title;
+  document.getElementById('dzMsg').innerHTML=msg;
+}
+function showError(msg){
+  const dz=document.getElementById('dz');
+  document.getElementById('drop').classList.remove('hide');
+  dz.classList.add('err');
+  document.getElementById('dzTitle').textContent='Couldn’t read that file';
+  document.getElementById('dzMsg').innerHTML=msg;
+}
+function readFile(file){
+  if(!file) return;
+  const name=file.name||'';
+  const r=new FileReader();
+  r.onerror=()=>showError('Failed to read the file.');
+  r.onload=e=>{
+    try{
+      const u8=new Uint8Array(e.target.result);
+      const head=String.fromCharCode.apply(null,u8.subarray(0,Math.min(64,u8.length)));
+      const isGPX = head.replace(/^\uFEFF/,'').trimStart().startsWith('<') || /<gpx/i.test(head) || /\.(gpx|xml)$/i.test(name);
+      const isBBL = head.startsWith('H Product') || /\.(bfl|bbl)$/i.test(name);
+      if(isBBL && !isGPX){
+        showBusy('Decoding blackbox log…','Reading frames locally — nothing is uploaded.');
+        setTimeout(()=>{ try{ render(parseBFL(u8),name); }catch(err){ showError(err.message); } },40);
+      } else {
+        render(parseGPX(new TextDecoder('utf-8').decode(u8)),name);
+      }
+    }catch(err){ showError(err.message); }
+  };
+  r.readAsArrayBuffer(file);
+}
+
+/* ---------------- wiring ---------------- */
+initMap();
+const fi=document.getElementById('fileinput');
+document.getElementById('loadbtn').onclick=()=>fi.click();
+document.getElementById('dz').onclick=()=>fi.click();
+fi.onchange=e=>readFile(e.target.files[0]);
+
+const drop=document.getElementById('drop');
+drop.addEventListener('dragover',e=>{e.preventDefault();drop.classList.add('over')});
+drop.addEventListener('dragleave',()=>drop.classList.remove('over'));
+drop.addEventListener('drop',e=>{e.preventDefault();drop.classList.remove('over');readFile(e.dataTransfer.files[0])});
+
+// allow dropping onto the whole window once a flight is already loaded
+const whole=document.getElementById('wholeDrop');
+let dragDepth=0;
+window.addEventListener('dragenter',e=>{e.preventDefault();dragDepth++; if(document.getElementById('drop').classList.contains('hide')) whole.classList.add('show');});
+window.addEventListener('dragover',e=>e.preventDefault());
+window.addEventListener('dragleave',e=>{dragDepth--; if(dragDepth<=0) whole.classList.remove('show');});
+window.addEventListener('drop',e=>{e.preventDefault();dragDepth=0;whole.classList.remove('show');
+  if(document.getElementById('drop').classList.contains('hide')&&e.dataTransfer.files[0]) readFile(e.dataTransfer.files[0]);});
+
+window.addEventListener('resize',()=>{ if(map) map.invalidateSize(); });
+
+/* logbook wiring */
+document.getElementById('logbtn').onclick=openLogbook;
+document.getElementById('lbClose').onclick=closeLogbook;
+document.getElementById('lbLookup').onclick=lookupLocation;
+document.getElementById('lbCsv').onclick=saveCSV;
+document.getElementById('lbPrint').onclick=()=>window.print();
+document.getElementById('backdrop').addEventListener('click',e=>{ if(e.target.id==='backdrop') closeLogbook(); });
+window.addEventListener('keydown',e=>{ if(e.key==='Escape') closeLogbook(); });
+</script>
+</body>
+</html>
